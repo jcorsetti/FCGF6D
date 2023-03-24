@@ -1,0 +1,1 @@
+sacct -j $1 -o JobID,ReqMem,ReqGRES,ReqCPUS

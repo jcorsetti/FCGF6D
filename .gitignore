@@ -1,0 +1,15 @@
+exp_data
+__pycache__
+lib
+pointnet2_ops_lib
+tmp
+data_*
+**/__pycache__/**
+.ipynb_checkpoints
+*.out
+*.txt
+outs/**
+submit.sh
+scratch.py
+pretrained_models/
+submit.sh
