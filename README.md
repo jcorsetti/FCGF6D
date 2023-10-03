@@ -20,7 +20,7 @@ After this you can install all the other libraries in the requirements.txt file.
 
 ## Preprocessing
 
-Download the YCBV test split and the OccludedLinemod (LMO) test and train_pbr split from the BOP challenge website.
+Download the YCBV test split and the OccludedLinemod (LMO) test and train_pbr split from the BOP challenge [website](https://bop.felk.cvut.cz/datasets/).
 All contents of YCBV should go in a data_ycbv folder, all contents of LMO should go in a data_lmo folder.
 
 After this, generate the ground truth by running:
@@ -83,7 +83,7 @@ Parts of this work was based on the code provided by [PVN3D](https://github.com/
 
 ## Citation
 
-Please cite [FCGF6D](https://arxiv.org/pdf/2307.15514.pdf) if you use this repository in your publications:
+Please cite [FCGF6D](https://arxiv.org/abs/2307.15514) if you use this repository in your publications:
 ```
 @inproceedings{corsetti2023fcgf6d,
   author = {Corsetti, Jaime and Boscaini, Davide and Poiesi, Fabio},
