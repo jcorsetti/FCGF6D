@@ -78,10 +78,8 @@ class MinkowskiMetricLearning(LightningModule):
 
         args = self.args
 
-        symm_info = mink_dataset.get_symmetries_info(args.path)
-
         if args.loss == 'hc_kernel':
-            loss_fn = hc_kernel_loss(symm_info, args.kernel_th_object, args.kernel_th_scene, args.use_consistency, args.pos_margin, args.neg_margin, args.use_symm)
+            loss_fn = hc_kernel_loss(args.kernel_th_object, args.kernel_th_scene, args.pos_margin, args.neg_margin)
         else:
             raise RuntimeError('Loss {} not implemented!'.format(args.loss))
     
@@ -167,7 +165,6 @@ class MinkowskiMetricLearning(LightningModule):
         obj_feats = batch[4]
         corrs_coords = batch[5]
         corrs_feats = batch[6]
-        sym_lists = batch[7]
         diameters = batch[-1]
 
         sparse_scene = ME.SparseTensor(scene_feats, scene_coords)
@@ -176,7 +173,7 @@ class MinkowskiMetricLearning(LightningModule):
  
         out_obj, out_scene = self.model((sparse_obj, sparse_scene))
 
-        return out_obj, out_scene, scene_filter, sparse_corrs, sym_lists, diameters
+        return out_obj, out_scene, scene_filter, sparse_corrs, diameters
 
 #################### TRAINING ##########################
 
@@ -191,11 +188,11 @@ class MinkowskiMetricLearning(LightningModule):
 
     def training_step(self, batch, batch_idx):
 
-        obj_ids = batch[12]
+        obj_ids = batch[11]
 
-        out_obj, out_scene, _, sparse_corrs, sym_lists, diameters = self.forward_batch(batch)
+        out_obj, out_scene, _, sparse_corrs, diameters = self.forward_batch(batch)
 
-        losses, distances = self.loss_fn(out_obj, out_scene, sparse_corrs, sym_lists, diameters, obj_ids)
+        losses, distances = self.loss_fn(out_obj, out_scene, sparse_corrs, diameters, obj_ids)
 
         loss, w_losses = self.reduce_losses(losses)
         
@@ -211,11 +208,11 @@ class MinkowskiMetricLearning(LightningModule):
 
     def validation_step(self, batch, batch_idx):
 
-        obj_ids = batch[12]
+        obj_ids = batch[11]
 
-        out_obj, out_scene, _, sparse_corrs, sym_lists, diameters = self.forward_batch(batch)
+        out_obj, out_scene, _, sparse_corrs, diameters = self.forward_batch(batch)
 
-        losses, distances = self.loss_fn(out_obj, out_scene, sparse_corrs, sym_lists, diameters, obj_ids)
+        losses, distances = self.loss_fn(out_obj, out_scene, sparse_corrs, diameters, obj_ids)
 
         loss, w_losses = self.reduce_losses(losses)
         
@@ -249,10 +246,6 @@ class MinkowskiMetricLearning(LightningModule):
         checkpoint_name = int(os.path.splitext(self.args.checkpoint)[0])
         filename = 'pred_{}_epoch={:04d}_{}_{}_{}'.format(self.args.split, checkpoint_name, self.args.obj, self.args.solver, self.args.seed)
         
-        if self.args.normalize:
-            filename += '_norm'
-        if self.args.add_rgb:
-            filename += '_extrargb'
         if self.args.oracle is not None:
             filename += f'_{self.args.oracle}'
 
@@ -278,17 +271,13 @@ class MinkowskiMetricLearning(LightningModule):
         scene_feats = batch[1]
         obj_coords = batch[3]
         obj_feats = batch[4]
-
-        sparse_scene = ME.SparseTensor(scene_feats, scene_coords)
-        sparse_obj = ME.SparseTensor(obj_feats, obj_coords)
-
-        gt_poses = batch[8]
-        part_ids = batch[10]
-        image_ids  = batch[11]
-        obj_ids =  batch[12]
+        gt_poses = batch[7]
+        part_ids = batch[9]
+        image_ids  = batch[10]
+        obj_ids =  batch[11]
 
         #out_obj, out_scene, scene_filter, sparse_corrs, sym_lists, diameters
-        out_obj, out_scene, scene_filter, sparse_corrs, _, _ = self.forward_batch(batch)
+        out_obj, out_scene, scene_filter, sparse_corrs, _ = self.forward_batch(batch)
         obj_list = torch.unique(out_obj.C[:,0]).cpu().numpy()
 
         for i_b in obj_list:
@@ -302,13 +291,6 @@ class MinkowskiMetricLearning(LightningModule):
             path = os.path.join(self.args.results_out, 'pcds')
             instance_id = '{:06d}_{:04d}_{:02d}'.format(int(part_id), int(img_id), int(obj_id))
     
-            if self.args.add_rgb:
-                obj_rgb = sparse_obj.features_at(i_b)
-                scene_rgb = sparse_scene.features_at(i_b)
-
-                obj_feats = torch.cat((obj_feats, obj_rgb),dim=1)
-                scene_feats = torch.cat((scene_feats, scene_rgb),dim=1)
-
             # if using oracle, compute object bbox and crop scene with it
             if self.args.oracle is not None:
                 
@@ -318,7 +300,7 @@ class MinkowskiMetricLearning(LightningModule):
 
             if scene_feats.shape[0] > 1 and obj_feats.shape[0] > 1:
 
-                pred_pose = register_pcd(obj_coords, scene_coords, obj_feats, scene_feats, solver=self.args.solver, icp=self.args.icp)
+                pred_pose = register_pcd(obj_coords, scene_coords, obj_feats, scene_feats, solver=self.args.solver)
                 pred_pose = np.copy(pred_pose)
 
             else:
@@ -358,34 +340,14 @@ class MinkowskiMetricLearning(LightningModule):
             voxel_size=args.voxel_size,
             scene_points=args.depth_points,
             obj_split=args.train_obj,
-            augs_rotate_scene=args.aug_rotate_scene,
-            augs_pcd=args.aug_pcd,
             augs_erase=args.aug_erase,
-            augs_crop_rotate=args.aug_crop_rotate,
             augs_rgb=args.aug_rgb,
-            use_symm=args.use_symm,
-            rot_egg=args.rot_egg,
-            corr_th = args.corr_th,
-            fixed_sampling=args.fixed_sampling,
-            filter_corrs=args.filter_corrs
+            corr_th = args.corr_th
         )
 
 
         # Log train/valid stats
         print('TRAIN samples: {:d}'.format(len(dataset)))
-
-        sampler = None
-        shuffle = True
-
-        if args.w_sampler:
-
-            obj_dist = torch.ones(dataset.obj_list.shape)
-            for hard_obj in [1,6,9,10]:
-                obj_dist[dataset.obj_list == hard_obj] = 1.3
-            obj_dist = softmax(obj_dist)
-
-            sampler = WeightedRandomSampler(obj_dist, num_samples=len(dataset))
-            shuffle = None
 
         # Get the training data loader
         loader_train = torch.utils.data.DataLoader(
@@ -393,8 +355,7 @@ class MinkowskiMetricLearning(LightningModule):
             batch_size=args.bs,
             num_workers=args.n_workers,
             collate_fn=ME_collation_fn,
-            shuffle=shuffle,
-            sampler=sampler,
+            shuffle=True,
             pin_memory=True,
             drop_last=True)
 
@@ -413,8 +374,7 @@ class MinkowskiMetricLearning(LightningModule):
             scene_points=args.depth_points,
             obj_split=args.valid_obj,
             oracle=args.oracle,
-            corr_th = args.corr_th,
-            fixed_sampling=args.fixed_sampling
+            corr_th = args.corr_th
         )
         print('VALID samples: {:d}'.format(len(dataset_valid)))
 
@@ -444,8 +404,7 @@ class MinkowskiMetricLearning(LightningModule):
             obj_split=args.obj,
             seed=args.seed,
             corr_th=2.,
-            oracle=args.oracle,
-            fixed_sampling=args.fixed_sampling
+            oracle=args.oracle
         )
         print('TEST samples: {:d}'.format(len(dataset_test)))
 

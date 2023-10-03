@@ -4,7 +4,6 @@ import json
 import os
 import sys
 
-import math
 import torch
 import numpy as np
 import open3d as o3d
@@ -29,8 +28,6 @@ def parse_args():
     parser.add_argument('--obj_split', type=str, default=None, help='Objects on which to evaluate. One of lm, lmo, lm-only')
     parser.add_argument('--oracle', type=str, default=None, help='If true, use ground truth detection boxes for testing')
     parser.add_argument('--solver', type=str, default='ransac', help='Solver type for pose, one of [ransac, teaser]')
-    parser.add_argument('--add_rgb', type=boolean_string, default=False, help='If true, add rgb to features before pose estimation')
-    parser.add_argument('--normalize', type=boolean_string, default=False, help='If true, features are normalized')
     parser.add_argument('--seed', type=int, default=1, help='Random seed')
 
     #icp args

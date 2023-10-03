@@ -6,11 +6,11 @@ import open3d as o3d
 from PIL import Image
 from torch.utils.data import Dataset
 from models.common import se3
-from utils.pcd import compute_corrs_nn, lift_pcd, sample_pcd, me_quantize_pcd, pcd_outlier_removal
-from utils.misc import sorted_alphanumeric, generate_random_rotation
+from utils.pcd import compute_corrs_nn, lift_pcd, sample_pcd, me_quantize_pcd
+from utils.misc import sorted_alphanumeric
 from torchvision.transforms import Compose
 from torchvision.transforms import ColorJitter
-from augmentations import random_erase, random_guided_erase, random_scene_rotation
+from augmentations import random_guided_erase
 import MinkowskiEngine as ME
 from plyfile import PlyData
 
@@ -19,7 +19,7 @@ FLAG_DEBUG_VIZ = False
 
 class mink_dataset(Dataset):
 
-    def __init__(self, root, name, split, model_points, scene_points, voxel_size=2., use_symm=False, augs_rotate_scene=False, augs_pcd=False, augs_rgb=False, augs_crop_rotate=False, augs_erase=False, oracle=None, rot_egg=False, seed=None, corr_th=2., obj_split='all', fixed_sampling=False, filter_corrs=False):
+    def __init__(self, root, name, split, model_points, scene_points, voxel_size=2., augs_rgb=False, augs_erase=False, oracle=None, seed=None, corr_th=2., obj_split='all', fixed_sampling=False, filter_corrs=False):
         self.root = root
         self.name = name
         self.split = split
@@ -30,22 +30,17 @@ class mink_dataset(Dataset):
         self.voxel_size = voxel_size
         self.corr_th = corr_th
         self.max_corrs = 1000
-        self.augs_pcd = augs_pcd
         self.augs_rgb = augs_rgb
         self.augs_erase = augs_erase
-        self.augs_crop_rotate = augs_crop_rotate
-        self.augs_rotate_scene = augs_rotate_scene
-        self.use_symm = use_symm
         self.obj_ids = self.get_object_split(obj_split)
         self.oracle = oracle
-        self.rot_egg = rot_egg
+
         self.seed = seed
         self.filter_corrs = filter_corrs
         self.fixed_sampling = fixed_sampling
 
         self.t_rgb = self.get_augs_rgb()
-        self.t_obj = random_erase(erase_size=0.1, prob=0.5)
-        self.t_scene_erase = random_guided_erase(erase_size=0.6,prob=0.5)
+        self.t_scene_erase = random_guided_erase(erase_size=0.1, prob=0.5)
         
         if self.seed is not None:
             print('SETTING SEED: ', self.seed)
@@ -55,10 +50,6 @@ class mink_dataset(Dataset):
             torch.cuda.manual_seed(self.seed)
             torch.backends.cudnn.benchmark = True
 
-        if self.rot_egg:
-            self.t_scene_rot = random_scene_rotation(prob=0.9)
-        else:
-            self.t_scene_rot = random_scene_rotation(prob=0.5)
         
         if self.oracle is not None:
             oracle_path = os.path.join(self.root, f'{self.split}_bbox_{self.oracle}.json')  
@@ -70,10 +61,6 @@ class mink_dataset(Dataset):
         # Get bbox annotations
         with open(os.path.join(root, 'models', 'models_info.json')) as file_json:
             self.gt_bbox = json.load(file_json)
-
-        if self.fixed_sampling:
-            with open(os.path.join(root, 'fps_idxs.json')) as file_json:
-                self.fps_idxs = json.load(file_json)
 
         # Watch out: this does not include plane or background channel
         self.n_classes = len(self.obj_ids)
@@ -166,34 +153,18 @@ class mink_dataset(Dataset):
 
         # get object pcd and pose
         obj_pcd, gt_pose = self._get_target_regr(name_image, annot, obj_id, annot_idx)
-
-        if self.augs_pcd:
-            obj_pcd = self.t_obj(obj_pcd)
         
         # depth lifting to get point cloud
         scene_pcd = lift_pcd(torch.tensor(target_depth), torch.tensor(cam_K))
         
         scene_pcd = sample_pcd(scene_pcd, n_points=self.scene_points)
-        if self.fixed_sampling:
-            idxs = self.fps_idxs[str(obj_id)]
-            obj_pcd = obj_pcd[idxs]
-        else:
-            obj_pcd = sample_pcd(obj_pcd, n_points=self.model_points)
+        obj_pcd = sample_pcd(obj_pcd, n_points=self.model_points)
 
         if self.augs_rgb:
             obj_pcd[:,3:6] = self.t_rgb(obj_pcd[:,3:6].unsqueeze(0)).squeeze(0)
 
         if self.augs_erase:
             scene_pcd = self.t_scene_erase(scene_pcd, info[str(obj_id)]['diameter'], obj_id)
-
-        if self.augs_crop_rotate:
-
-            if (self.rot_egg and obj_id == 10) or not self.rot_egg:
-                
-                scene_pcd, gt_pose = self.t_scene_rot(scene_pcd, gt_pose, obj_id)
-        
-        if self.augs_rotate_scene:
-            scene_pcd, gt_pose = self.rotate_scene(scene_pcd, gt_pose)
         
         # quantize pcds and update translation target
         
@@ -206,9 +177,9 @@ class mink_dataset(Dataset):
         # compute correspondencies
         pts_allowed = torch.nonzero(scene_feats[:, -2] == obj_id).squeeze(1)
         if pts_allowed.shape[0] > 0:
-            corrs, sym_matrix = self.get_corrs(obj_coords, info[str(obj_id)], gt_pose, scene_coords, pts_allowed)        
+            corrs = self.get_corrs(obj_coords, info[str(obj_id)], gt_pose, scene_coords, pts_allowed)        
         else:
-            corrs, sym_matrix = torch.zeros((0,2)), torch.zeros((1,1),dtype=torch.long)
+            corrs = torch.zeros((0,2))
 
         if len(corrs.shape) == 1:
             corrs = torch.zeros((0,2))
@@ -217,25 +188,7 @@ class mink_dataset(Dataset):
         scene_filter = torch.nonzero(scene_feats[:,-1])
         scene_feats = scene_feats[:,:3]
 
-        return scene_coords, scene_feats, scene_filter, obj_coords, obj_feats, corrs, sym_matrix, gt_pose, cam_K, part_id, image_id, obj_id, diameter
-
-    @staticmethod
-    def rotate_scene(scene, gt_pose):
-
-        scene_pcd, scene_feats = scene[:,:3], scene[:,3:]
-
-        inverse_gt = se3.torch_inverse(gt_pose)
-        
-        rand_rot_pose = torch.zeros((3,4))
-        rand_rot = torch.tensor(generate_random_rotation())
-        rand_rot_pose[:3,:3] = rand_rot
-
-        canon_scene = se3.torch_transform(inverse_gt, scene_pcd)
-        gt_pose[:3,:3] = rand_rot @ gt_pose[:3,:3] 
-        rot_scene_pcd = se3.torch_transform(gt_pose, canon_scene)
-        rot_scene = torch.cat((rot_scene_pcd,scene_feats),dim=1)
-        
-        return rot_scene, gt_pose 
+        return scene_coords, scene_feats, scene_filter, obj_coords, obj_feats, corrs, gt_pose, cam_K, part_id, image_id, obj_id, diameter
 
     @staticmethod
     def get_symmetries_info(root):
@@ -257,58 +210,7 @@ class mink_dataset(Dataset):
         rot_obj = se3.torch_transform(pose, obj)
         corrs = compute_corrs_nn(rot_obj, scene, pts_allowed, pos_threshold=self.corr_th, max_corr=self.max_corrs)
         
-        # if using symm corrs and object is symmetric
-        if 'symmetries_discrete' in obj_info and self.use_symm:
-            for symmetry_rot in obj_info['symmetries_discrete']:
-
-                symmetry_rot = torch.tensor(symmetry_rot).reshape(4,4) 
-                symmetry_rot[:3,3] = symmetry_rot[:3,3] / self.voxel_size
-                sym_obj_coords = se3.torch_transform(symmetry_rot, obj)
-                sym_obj_coords = se3.torch_transform(pose, sym_obj_coords)
-                sym_corrs = compute_corrs_nn(sym_obj_coords, scene, pts_allowed, pos_threshold=self.corr_th, max_corr=self.max_corrs)
-                corrs = torch.cat((corrs, sym_corrs),dim=0)
-
-            # remove non unique corrs
-            corrs = torch.unique(corrs, dim=0)
-            
-            if corrs.shape[0] > 0:
-                # additional sampling if necessary
-                if corrs.shape[0] > self.max_corrs:
-                    uniform_dist = torch.ones(corrs.shape[0], dtype=torch.float).to(corrs.device)
-                    choosen = torch.multinomial(uniform_dist, self.max_corrs, replacement=False)
-                    corrs = corrs[choosen]
-
-                # max number of association to a single object point
-                max_symm = torch.max(torch.unique(corrs[:,1], return_counts=True)[1])
-                
-                # use index of index of points for object correspondences. Easier in loss later
-                idxs_corr_objs = torch.arange(0,corrs.shape[0])
-                indexed_corrs = torch.stack([idxs_corr_objs, corrs[:,1]],dim=1)
-                
-                # compute unique scene correspondences
-                unique_corrs_scene = torch.unique(corrs[:,1])
-                
-                # list of list. Each list contains object points which are symmetric/very near to each othe
-                sym_list = [indexed_corrs[corrs[:,1] == scene_idx][:,0] for scene_idx in unique_corrs_scene]
-                
-                # compute padded list, fill empty space with first element, which will be excluded anyway!
-                padded_sym_list = torch.nn.utils.rnn.pad_sequence(sym_list,padding_value=-1).transpose(1,0)
-                first = padded_sym_list[:,0].repeat(max_symm,1).transpose(1,0)
-                padded_sym_list = torch.where(padded_sym_list == -1, first, padded_sym_list)
-        
-            else:
-                padded_sym_list = torch.zeros((1,1),dtype=torch.long)
-
-        else:
-            padded_sym_list = torch.zeros((1,1),dtype=torch.long)
-
-        if self.filter_corrs and corrs.shape[0] >= 10:
-            corrs_obj_idxs = corrs[:,0]
-            corrs_obj_points = obj[corrs_obj_idxs]
-            idxs_remain = pcd_outlier_removal(corrs_obj_points, k=10, dist=10)
-            corrs = corrs[idxs_remain,:]
-        
-        return corrs, padded_sym_list
+        return corrs
 
     def __len__(self):
         return len(self.images)
@@ -410,7 +312,7 @@ class mink_dataset(Dataset):
 
 def ME_collation_fn(data):
 
-    scene_coords, scene_feats, scene_filter, obj_coords, obj_feats, corrs, sym_matrices, gt_pose, cam_K, part_id, image_id, obj_id, diameter = list(zip(*data))
+    scene_coords, scene_feats, scene_filter, obj_coords, obj_feats, corrs, gt_pose, cam_K, part_id, image_id, obj_id, diameter = list(zip(*data))
 
     scene_coords_b, scene_feats_b = ME.utils.sparse_collate(scene_coords, scene_feats)
     obj_coords_b, obj_feats_b = ME.utils.sparse_collate(obj_coords, obj_feats)
@@ -432,4 +334,4 @@ def ME_collation_fn(data):
     diameters = torch.tensor(diameter)
     cam_K = torch.stack([torch.tensor(cam_i) for cam_i in cam_K], dim=0)
 
-    return scene_coords_b, scene_feats_b, scene_filter, obj_coords_b, obj_feats_b, corrs_coords, corrs_feats, sym_matrices, gt_pose, cam_K, part_id, image_id, obj_id, diameters
+    return scene_coords_b, scene_feats_b, scene_filter, obj_coords_b, obj_feats_b, corrs_coords, corrs_feats, gt_pose, cam_K, part_id, image_id, obj_id, diameters

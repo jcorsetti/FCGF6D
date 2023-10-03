@@ -1,160 +1,95 @@
 # 6Dpose
 
+Welcome to the official repository of ***Revisiting Fully Convolutional Geometric Features for Object 6D Pose Estimation***, or ***FCGF6D***,
+to be presented at [Recovering 6D Pose Workshop](https://cmp.felk.cvut.cz/sixd/workshop_2023/) at ICCV 2023.
+The repository is still work in progress as I am simplifing and refactoring the code, but everything is here. 
+I am currently busy finishing my Master's Degree, but I hope to get all the code done by end of October.
+Feel free to contact me if you have any questions: jaime.corsetti98@gmail.com.
+
+**TODOS**:
+- Provide checkpoints
+- Instructions to generate YCBV training set
+- Add metadata (e.g. object splits)
+
 ## Setup
 
-Create virtual environment:
-
-```bash
-conda create --name 6Dpose python=3.8
-```
-
-Install PyTorch:
-
-```bash
-conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
-```
-
-Install dependencies:
-
-```bash
-pip install tensorboard open3d opencv-python pytorch_warmup
-```
-
-```bash
-pip install torch-cluster -f https://data.pyg.org/whl/torch-1.9.0+cu102.html
-```
-
-Do we need also scikit-image?
-
-For FPS computation we utilize a cpp module contained in lib/ directory. It depends on the cffi package, hence it should be installed:
-```bash
-pip install cffi
-```
-To configure run the following:
-```bash
-cd lib/csrc/fps
-python3 setup.py build_ext --inplace
-```
+Our work is based on [Minkoski Engine](https://github.com/NVIDIA/MinkowskiEngine) and implemented with [Pytorch Lightning](https://lightning.ai/docs/pytorch/stable/).
+Please install them following the official instructions before proceeding.
+We strongly suggest to use a virtual environment for the installation.
+After this you can install all the other libraries in the requirements.txt file.
 
 ## Preprocessing
 
+Download the YCBV test split and the OccludedLinemod (LMO) test and train_pbr split from the BOP challenge website.
+All contents of YCBV should go in a data_ycbv folder, all contents of LMO should go in a data_lmo folder.
+
+After this, generate the ground truth by running:
+```bash
+python utils_scripts/make_gt.py --dataset lmo --split test
+python utils_scripts/make_gt.py --dataset ycbv --split test
+```
+
+and place the resulting files in the eval_gts folder.
+This formats the ground truth in an easy-to-read file to be used for the compute_metrics.py script.
+
+Generate the segmentation mask in a better format by running:
+```bash
+python utils_scripts/preprocessing_mask.py --dataset lmo --split test
+python utils_scripts/preprocessing_mask.py --dataset ycbv --split test
+```
+This will turn the N binary masks for each image provided by BOP in a single mask, which speeds up the I/O processes.
+
+Finally apply the hole filling algorithms:
+```bash
+python utils_scripts/hole_filling.py --dataset lmo --split test
+python utils_scripts/hole_filling.py --dataset ycbv --split test
+```
+to generate the hole filled depth masks as in PVN3D and FFB6D.
+Hole filling algorithm and mask preprocessing should be carried out also for any training splits.
+
 ## Train
 
+For OccludedLinemod and YCBV trainings
+
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2 python -W ignore run_train.py --exp 'exp??' --n_workers 2 --bs 8 --n_epochs 100 --freq_train 1 --freq_valid 10 --freq_save 10 --split_train 'train_pbr' --split_val 'test' --optim_type 'Adam' --lr 1e-3 --scheduler_type 'step' --gamma 0.1 --mu3 1.0 --seg_loss dice --use_augs norm
+CUDA_VISIBLE_DEVICES=0 python run_train.py --exp exp_lmo --dataset lmo --split_train 'train_pbr' --split_val 'test' --bs 8 --n_epochs 10 --freq_valid 2 --freq_save 2  --augs_erase True --augs_rgb True --depth_points 50000 --arch mink34
+CUDA_VISIBLE_DEVICES=0 python run_train.py --exp exp_ycbv --dataset ycbv --split_train 'custom_train' --split_val 'test' --bs 8 --n_epochs 110 --freq_valid 10 --freq_save 10  --augs_erase True --augs_rgb True --depth_points 20000 --arch mink50
 ```
 
-Format for augmentation list:
-
-A string in the format aug_code1,augcode2,..,augcodeN
-
-Where augcode is one of:
-
--hflip  : random horizontal flip
--vflip  : random vertical flip
--jitter : random color jittering
--norm   : normalization
--rotate : random rotation
-
-Example:
-
---use_augs norm,hflip,vflip
-
-Additional training arguments:
-
-To train only on a single class (ex. 5):
-```bash
---use_single_class 5 
-```
-NB: this should be used also with run_test.py script
-
-To not use random augmentations:
-```bash
---use_augs False 
-```
- 
-
-## Resume train
-
-Add --flag_resume --checkpoint 'epoch=????' to the training arguments to resume the training from a given checkpoint
+please see utils/parsing.py (parse_train_args function) for the complete list of options at training time.
 
 ## Test
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 python -W ignore run_test.py --exp debug_depth --n_workers 1 --bs 1 --split overfit --checkpoint 'epoch=01999'
+CUDA_VISIBLE_DEVICES=0 python --exp exp_lmo --depth_points 50000 --arch mink34 --checkpoint 'epoch=0009' --split test --solver teaser
+CUDA_VISIBLE_DEVICES=0 python --exp exp_ycbv --depth_points 20000 --arch mink50 --checkpoint 'epoch=0109' --split test --solver ransac
 ```
 
-By default, the above script expects a model not trained with plane mask. To evaluate a model trained with plane mask, there are two options:
-```bash
---use_plane_model True // This will evaluate a plane-trained model without using plane for evalution
---use_plane_model True --use_plane_eval True // This will evaluate a plane-trained model also using plane for evalution
-```
+please see utils/parsing.py (parse_test_args function) for the complete list of options at evaluation time.
+
+The above scripts will produce the poses, in order to compute the metrics also the following is necessary:
 
 ## Metrics
 
-To compute ADD and REP metrics use:
 
 ```bash
-python compute_metrics.py --exp 'exp00' --split 'test' --checkpoint 'epoch=???'
+python compute_metrics.py --exp 'exp_lmo' --split 'test' --checkpoint 'epoch=0009' --solver teaser 
+python compute_metrics.py --exp 'exp_ycbv' --split 'test' --checkpoint 'epoch=0109' --solver ransac 
 ```
 
-If not already present, ground truth should be generated before running compute_metrics:
+## Acknowledgements
 
-```bash
-python make_gt.py --split 'test'
+Parts of this work was based on the code provided by [PVN3D](https://github.com/ethnhe/PVN3D) (ADDS-AUC metric code) and [Fast Depth Completition](https://github.com/kujason/ip_basic) for the depth hole-filling algorithm.
+
+## Citation
+
+Please cite [FCGF6D](https://arxiv.org/pdf/2307.15514.pdf) if you use this repository in your publications:
+```
+@inproceedings{corsetti2023fcgf6d,
+  author = {Corsetti, Jaime and Boscaini, Davide and Poiesi, Fabio},
+  title = {Revisiting Fully Convolutional Geometric Features for Object 6D Pose Estimation},
+  booktitle = {International Workshop on Recovering 6D Object Pose (R6D)},
+  year = {2023}
+}
 ```
 
-### BOP Toolkit
-
-In order to use the BOP Toolkit for validating metrics results, clone the repository at https://github.com/thodan/bop_toolkit and follow the instructions for installation. After that, in order to compute the wanted metrics, the file scripts/eval_bop19.py should be modified. In particular, at [line 21]( https://github.com/thodan/bop_toolkit/blob/2caac4ed3b57c78a2379d0f4f0d76e67d66718d4/scripts/eval_bop19.py#L21) are listed the errors to compute; it is sufficient to replace the default errors with the following lines
-```pytrhon
-p = {
-  # Errors to calculate.
-  'errors': [
-    {
-      'n_top': -1,
-      'type': 'add',
-      'correct_th': [[0.1]]
-    },
-    {
-      'n_top': -1,
-      'type': 'proj',
-      'correct_th': [[5]]
-    },
-  ],
-```
-or with any implemented errors we want the script to compute; such errors can be found in scripts/bop_toolkit_lib/pose_error.py.
-Then execute the script as reported in the repo
-
-```bash
-python3 scripts/eval_bop19.py --renderer_type=python --result_filenames=NAME_OF_CSV_WITH_RESULTS
-```
-Note that the name of the file containing the results should be changed; in the bop toolkit files of results should follow the convention name-of-method_datasets-split.csv, e.g. our-method_lmo-test.csv
-If we want to use the toolkit to test the method on the whole test set rather than on the subset of the BOP challenge, run write_json.py:
-```bash
-python3 write_json.py --path PATH_TO_THE_DATASET 
-```
-and then proceed as explained above.
-
-## Notes
-
-With batch size = 16, an epoch requires 3125 iterations and takes around 2900 seconds (50 minutes).
-If we do not log the gradients on tensorboard the time drops to around 2200 seconds (37 minutes).
-
-### Struttura del dataset
-
-LM consiste di 15 scene di test, denominate 000001, 000002, ..., 000015.
-Per ogni scena viene fornita la maschera e la ground-truth solamente dell'oggetto centrale.
-LM-O è stato costruito selezionando la scena 000002 ed annotando invece più oggetti (che sono un sottoinsieme di quelli di LM).
-
-Una cosa importante da tenere presente è la convenzione utilizzato per denominare le maschere.
-Per ogni immagine di test, e.g. 000003.png, ci sono tante maschere quanti sono gli oggetti presenti nell'immagine,
-i.e. 000003_000001.png, 000003_000002.png, ..., 000003_000007.png.
-Dal momento che non per forza tutti gli oggetti sono presenti nell'immagine,
-il numero dopo l'underscore indica solamente l'ordine relativo degli oggetti nella lista degli oggetti del dataset
-e per capire di che oggetto si tratta dobbiamo quindi fare riferimento alle grount-truths contenute in scene_gt.json.
-
-### Procedura di training
-
-Abbiamo notato che sul sito di BOP vengono fornite delle immagini di training sintetiche create utilizzando una procedura analoga a quella del paper di riferimento *Segmentation-driven 6D Object Pose Estimation*.
-Possono essere trovate [qui](https://thodan.github.io/objectsynth/).

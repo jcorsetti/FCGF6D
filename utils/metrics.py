@@ -86,7 +86,7 @@ def VOCap(rec, prec):
     ap = np.sum((mrec[i] - mrec[i-1]) * mpre[i]) * 10
     return ap
 
-def register_pcd(depth, obj, depth_feats, obj_feats, solver='ransac', icp=False):
+def register_pcd(depth, obj, depth_feats, obj_feats, solver='ransac'):
     '''
     depth: torch.tensor(N,3)
     obj: torch.tensor(M,3)

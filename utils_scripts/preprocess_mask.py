@@ -46,7 +46,7 @@ def main(args):
                 obj_id = int(obj_annot['obj_id'])
                 obj_visib  = img_meta[obj_idx]['visib_fract']
 
-                if obj_visib > 0.1:
+                if obj_visib > 0.:
                     obj_mask = Image.open(join(split_root, 'mask_visib', '{:06d}_{:06d}.png'.format(int(img_id), obj_idx))).convert('L')
                     obj_mask = np.asarray(obj_mask).copy()
                     obj_mask[obj_mask == 255] = obj_id

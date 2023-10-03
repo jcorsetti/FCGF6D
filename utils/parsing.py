@@ -17,10 +17,9 @@ def parse_test_args():
     # Train
     parser.add_argument('--bs', type=int, default=8, help='Batch size')
     parser.add_argument('--model_points', type=int, default=4096, help='Number of sampled points per object model')
-    parser.add_argument('--depth_points', type=int, default=20000, help='Number of sampled points per depth point cloud')
+    parser.add_argument('--depth_points', type=int, default=50000, help='Number of sampled points per depth point cloud')
     parser.add_argument('--voxel_size', type=float, default=2., help='Minkowski quantization sampling size, in mm')
-    parser.add_argument('--obj', type=str, default='all', help='Test split. One of lm, lmo, lm-only')
-    parser.add_argument('--fixed_sampling', type=boolean_string, default=False, help='Fix object sampling if true')
+    parser.add_argument('--obj', type=str, default='all', help='Object test splits')
 
     # Data
     parser.add_argument('--dataset', type=str, default='lmo', help='Name of dataset')
@@ -32,9 +31,7 @@ def parse_test_args():
     parser.add_argument('--checkpoint', type=str, help='Name of the checkpoint file')
     parser.add_argument('--arch', type=str, default='mink34', help='Type of net used for point cloud feature extraction')
     parser.add_argument('--dim_features', type=int, default=32, help='Dimension of features vector in output')
-    parser.add_argument('--add_rgb', type=boolean_string, default=False, help='If true, add rgb to features before pose estimation')
-    parser.add_argument('--normalize', type=boolean_string, default=False, help='If true, apply normalization and temperature')
-    parser.add_argument('--first_kernel', type=int, default=5, help='Dimension of first kernel')
+    parser.add_argument('--first_kernel', type=int, default=5, help='Dimension of first minknet kernel')
 
 
     args = parser.parse_args()
@@ -54,7 +51,6 @@ def parse_train_args():
     parser.add_argument('--profile', type=boolean_string, default=False, help='Use PL Advanced Profiler')
     parser.add_argument('--oracle', type=str, default=None, help='Eventual oracle for detection')
 
-
     # Train
     parser.add_argument('--bs', type=int, default=8, help='Batch size')
     parser.add_argument('--start_epoch', type=int, default=0, help='Manual epoch number (useful on restarts)')
@@ -64,7 +60,6 @@ def parse_train_args():
     parser.add_argument('--freq_save', type=int, default=10, help='Frequence at which save the model')
     parser.add_argument('--flag_resume', action='store_true', help='Flag to resume training from checkpoint')
     parser.add_argument('--checkpoint', type=str, default=None, help='Name of the checkpoint file')
-    parser.add_argument('--fixed_sampling', type=boolean_string, default=False, help='Fix object sampling if true')
     
     # Generalization
     parser.add_argument('--train_obj', type=str, default='all', help='Training split. One of lm, lmo, lm-only')
@@ -75,29 +70,19 @@ def parse_train_args():
     parser.add_argument('--split_train', type=str, default='train_pbr',help='Data split where to perform training')
     parser.add_argument('--split_valid', type=str, default='test',help='Data split where to perform validation')
     parser.add_argument('--model_points', type=int, default=4096, help='Number of sampled points per object model')
-    parser.add_argument('--depth_points', type=int, default=20000, help='Number of sampled points per depth point cloud')
+    parser.add_argument('--depth_points', type=int, default=50000, help='Number ofsampled points per depth point cloud')
     parser.add_argument('--voxel_size', type=float, default=2., help='Minkowski quantization sampling size, in mm')
-    parser.add_argument('--use_symm', type=boolean_string, default=False, help='Use symmetric correspondencies if true')
-    parser.add_argument('--w_sampler', type=boolean_string, default=False, help='Apply weighted samples if true')
     parser.add_argument('--corr_th', type=float, default=2., help='Threshold for correspondences')
-    parser.add_argument('--filter_corrs', type=boolean_string, default=False, help='If true apply pcd outlier removal to filter correspondences')
-
+    
     # Augs
-    parser.add_argument('--aug_rotate_scene', type=boolean_string, default=False, help='If True, rotates the whole scene')
     parser.add_argument('--aug_erase', type=boolean_string, default=False, help='If True, applies guided random erasing on scene')
-    parser.add_argument('--aug_crop_rotate', type=boolean_string, default=False, help='If True, applies crop & rotate augmentation on point cloud scene')
-    parser.add_argument('--aug_pcd', type=boolean_string, default=False, help='If True, applies random erasing on object model')
     parser.add_argument('--aug_rgb', type=boolean_string, default=False, help='If True, apply augmentations to RGB data')
-    parser.add_argument('--rot_egg', type=boolean_string, default=False, help='If True, applies rotation only to eggbox')
-
+     
     # Model
     parser.add_argument('--arch', type=str, default='mink34', help='Type of net used for point cloud feature extraction')
-    parser.add_argument('--loss', type=str, default='hc_kernel', help='Type of loss for metric learning. One of [hc,hc_kernel,hc_negative_kernel')
+    parser.add_argument('--loss', type=str, default='hc_kernel', help='Type of loss for metric learning')
     parser.add_argument('--dim_features', type=int, default=32, help='Dimension of features vector in output')
-    parser.add_argument('--normalize', type=boolean_string, default=False, help='If true, apply normalization and temperature')
     parser.add_argument('--first_kernel', type=int, default=5, help='Dimension of first kernel')
-    parser.add_argument('--use_consistency', type=boolean_string, default=False, help='If true, use consistency loss')
-
 
     # Optimizer
     parser.add_argument('--optim_type', type=str, default='Adam', help='Optimizer type')
@@ -110,8 +95,6 @@ def parse_train_args():
     parser.add_argument('--mu1', type=float, default=1., help='Weight of positive loss')
     parser.add_argument('--mu2', type=float, default=0.6, help='Weight of negative object loss')
     parser.add_argument('--mu3', type=float, default=0.4, help='Weight of negative scene loss')
-    parser.add_argument('--mu4', type=float, default=0.5, help='Weight of consistency object loss')
-    parser.add_argument('--mu5', type=float, default=0.5, help='Weight of consistency scene loss')
 
     parser.add_argument('--pos_margin', type=float, default=0.1, help='Distance margin for positive features')
     parser.add_argument('--neg_margin', type=float, default=10., help='Distance margin for negative features')
