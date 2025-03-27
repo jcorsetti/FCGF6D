@@ -1,4 +1,4 @@
-# 6Dpose
+# [ICCV workshops 2023] Revisiting Fully Convolutional Geometric Features for Object 6D Pose Estimation
 
 Welcome to the official repository of ***Revisiting Fully Convolutional Geometric Features for Object 6D Pose Estimation***, or ***FCGF6D***,
 to be presented at [Recovering 6D Pose Workshop](https://cmp.felk.cvut.cz/sixd/workshop_2023/) at ICCV 2023.
